@@ -1,0 +1,141 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 0.1 Context-Aware Helper Constraints
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Validation Blueprints (Pillar 2)
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'isPro', 'settings', 'usage', 'createdAt'])
+        && data.uid is string && data.uid.size() <= 128
+        && data.email is string && data.email.size() <= 256
+        && data.isPro is bool
+        && data.settings is map
+        && data.usage is map
+        && data.createdAt is string;
+    }
+
+    function isValidChat(data) {
+      return data.keys().hasAll(['userId', 'title', 'createdAt', 'updatedAt'])
+        && data.userId is string && data.userId.size() <= 128
+        && data.title is string && data.title.size() <= 500
+        && data.createdAt is string || data.createdAt is timestamp
+        && data.updatedAt is string || data.updatedAt is timestamp;
+    }
+
+    function isValidMessage(data) {
+      return data.keys().hasAll(['role', 'content', 'timestamp'])
+        && data.role in ['user', 'assistant']
+        && data.content is string && data.content.size() <= 100000
+        && data.timestamp is string || data.timestamp is timestamp;
+    }
+
+    function isValidNote(data) {
+      return data.keys().hasAll(['userId', 'title', 'content', 'createdAt', 'updatedAt'])
+        && data.userId is string && data.userId.size() <= 128
+        && data.title is string && data.title.size() <= 500
+        && data.content is string && data.content.size() <= 100000
+        && data.createdAt is string
+        && data.updatedAt is string;
+    }
+
+    function isValidTask(data) {
+      return data.keys().hasAll(['userId', 'text', 'completed', 'createdAt', 'updatedAt'])
+        && data.userId is string && data.userId.size() <= 128
+        && data.text is string && data.text.size() <= 1000
+        && data.completed is bool
+        && data.createdAt is string
+        && data.updatedAt is string;
+    }
+
+    function isValidImage(data) {
+      return data.keys().hasAll(['userId', 'url', 'prompt', 'createdAt'])
+        && data.userId is string && data.userId.size() <= 128
+        && data.url is string && data.url.size() <= 2000000 // support base64 up to 2MB
+        && data.prompt is string && data.prompt.size() <= 2000
+        && data.createdAt is string;
+    }
+
+    // --- COLLECTION RULES ---
+
+    // User Profiles
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) 
+        && isValidUser(incoming())
+        && incoming().uid == userId;
+      allow update: if isOwner(userId)
+        && isValidUser(incoming())
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt;
+    }
+
+    // Chats architecture
+    match /users/{userId}/chats/{chatId} {
+      allow list, get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(chatId) && isValidChat(incoming()) && incoming().userId == userId;
+      allow update: if isOwner(userId) && isValidChat(incoming()) 
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt;
+      allow delete: if isOwner(userId);
+
+      // Messages sub-collection
+      match /messages/{messageId} {
+        allow list, get: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(messageId) && isValidMessage(incoming());
+      }
+    }
+
+    // Wisdom Library (Notes)
+    match /users/{userId}/notes/{noteId} {
+      allow list, get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(noteId) && isValidNote(incoming()) && incoming().userId == userId;
+      allow update: if isOwner(userId) && isValidNote(incoming()) 
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt;
+      allow delete: if isOwner(userId);
+    }
+
+    // Tasks (Action sequences)
+    match /users/{userId}/tasks/{taskId} {
+      allow list, get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(taskId) && isValidTask(incoming()) && incoming().userId == userId;
+      allow update: if isOwner(userId) && isValidTask(incoming()) 
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt;
+      allow delete: if isOwner(userId);
+    }
+
+    // Creative Vault (Images)
+    match /users/{userId}/images/{imageId} {
+      allow list: if isOwner(userId);
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(imageId) && isValidImage(incoming()) && incoming().userId == userId;
+      allow delete: if isOwner(userId);
+    }
+  }
+}

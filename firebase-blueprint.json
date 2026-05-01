@@ -1,0 +1,163 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User profile and usage statistics",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "usage": {
+          "type": "object",
+          "properties": {
+            "chatCount": { "type": "integer" },
+            "imageCount": { "type": "integer" },
+            "pdfCount": { "type": "integer" }
+          }
+        },
+        "isPro": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "createdAt"]
+    },
+    "Chat": {
+      "title": "Chat Session",
+      "description": "A conversation with AI",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "model": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "createdAt"]
+    },
+    "Message": {
+      "title": "Chat Message",
+      "description": "A single message in a chat",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "role": { "enum": ["user", "assistant"] },
+        "content": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["role", "content", "timestamp"]
+    },
+    "Note": {
+      "title": "User Note",
+      "description": "Saved note or generated text content",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "content", "createdAt"]
+    },
+    "Task": {
+      "title": "User Task",
+      "description": "To-do list item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "text": { "type": "string" },
+        "completed": { "type": "boolean" },
+        "noteId": { "type": "string" },
+        "dueDate": { "type": "string", "format": "date-time" },
+        "reminder": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "text", "completed", "createdAt"]
+    },
+    "GeneratedImage": {
+      "title": "Generated Image",
+      "description": "Information about an AI generated image",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "url": { "type": "string" },
+        "prompt": { "type": "string" },
+        "style": { "type": "string" },
+        "aspectRatio": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "url", "prompt", "createdAt"]
+    },
+    "Member": {
+      "title": "Item Member",
+      "description": "A user with access to a shared item",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "enum": ["viewer", "editor", "owner"] },
+        "addedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "email", "role", "addedAt"]
+    },
+    "Invitation": {
+      "title": "Collaboration Invitation",
+      "description": "Pending invitation to collaborate",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "itemId": { "type": "string" },
+        "itemType": { "enum": ["note", "chat"] },
+        "ownerId": { "type": "string" },
+        "role": { "enum": ["viewer", "editor"] },
+        "status": { "enum": ["pending", "accepted", "declined"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "itemId", "itemType", "ownerId", "role", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile data"
+    },
+    "/users/{userId}/chats/{chatId}": {
+      "schema": "Chat",
+      "description": "User conversation sessions"
+    },
+    "/users/{userId}/chats/{chatId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Individual messages in a chat"
+    },
+    "/users/{userId}/chats/{chatId}/members/{memberId}": {
+      "schema": "Member",
+      "description": "Collaborators in a chat"
+    },
+    "/users/{userId}/notes/{noteId}": {
+      "schema": "Note",
+      "description": "User saved notes"
+    },
+    "/users/{userId}/notes/{noteId}/members/{memberId}": {
+      "schema": "Member",
+      "description": "Collaborators in a note"
+    },
+    "/invitations/{invitationId}": {
+      "schema": "Invitation",
+      "description": "Global invitations queue"
+    },
+    "/users/{userId}/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "User to-do list tasks"
+    },
+    "/users/{userId}/images/{imageId}": {
+      "schema": "GeneratedImage",
+      "description": "User generated images"
+    }
+  }
+}

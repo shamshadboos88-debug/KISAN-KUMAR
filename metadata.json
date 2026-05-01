@@ -1,0 +1,13 @@
+{
+  "name": "COGNORYX AI",
+  "description": "All-in-one AI-powered productivity platform for chat, notes, PDF analysis, quizzes, and image generation.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "AI Chat",
+    "PDF Analysis",
+    "Quiz Generation",
+    "Image Generation"
+  ]
+}

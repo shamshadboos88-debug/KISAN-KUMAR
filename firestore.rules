@@ -1,0 +1,210 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 0.1 Context-Aware Helper Constraints
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isMemberOf(ownerId, type, itemId) {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(ownerId)/$(type)/$(itemId)/members/$(request.auth.uid));
+    }
+
+    function memberRole(ownerId, type, itemId) {
+      return get(/databases/$(database)/documents/users/$(ownerId)/$(type)/$(itemId)/members/$(request.auth.uid)).data.role;
+    }
+
+    function isTimestampOrString(val) {
+      return val is string || val is timestamp;
+    }
+
+    // Validation Blueprints (Pillar 2)
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'isPro', 'settings', 'usage', 'createdAt'])
+        && data.uid is string && data.uid.size() <= 128
+        && data.email is string && data.email.size() <= 256
+        && data.isPro is bool
+        && data.settings is map
+        && data.usage is map
+        && data.createdAt is string; // User profile uses ISO string
+    }
+
+    function isValidChat(data) {
+      return data.keys().hasAll(['userId', 'title', 'createdAt', 'updatedAt'])
+        && data.userId is string && data.userId.size() <= 128
+        && data.title is string && data.title.size() <= 500
+        && isTimestampOrString(data.createdAt)
+        && isTimestampOrString(data.updatedAt);
+    }
+
+    function isValidMessage(data) {
+      return data.keys().hasAll(['role', 'content', 'timestamp'])
+        && data.role in ['user', 'assistant']
+        && data.content is string && data.content.size() <= 100000
+        && isTimestampOrString(data.timestamp);
+    }
+
+    function isValidNote(data) {
+      return data.keys().hasAll(['userId', 'title', 'content', 'createdAt', 'updatedAt'])
+        && data.userId is string && data.userId.size() <= 128
+        && data.title is string && data.title.size() <= 500
+        && data.content is string && data.content.size() <= 100000
+        && isTimestampOrString(data.createdAt)
+        && isTimestampOrString(data.updatedAt);
+    }
+
+    function isValidTask(data) {
+      return data.keys().hasAll(['userId', 'text', 'completed', 'createdAt', 'updatedAt'])
+        && data.userId is string && data.userId.size() <= 128
+        && data.text is string && data.text.size() <= 1000
+        && data.completed is bool
+        && isTimestampOrString(data.createdAt)
+        && isTimestampOrString(data.updatedAt);
+    }
+
+    function isValidImage(data) {
+      return data.keys().hasAll(['userId', 'url', 'prompt', 'createdAt'])
+        && data.userId is string && data.userId.size() <= 128
+        && data.url is string && data.url.size() <= 2000000 
+        && data.prompt is string && data.prompt.size() <= 2000
+        && isTimestampOrString(data.createdAt);
+    }
+
+    function isValidMember(data) {
+      return data.keys().hasAll(['userId', 'email', 'role', 'addedAt'])
+        && data.userId is string && data.userId.size() <= 128
+        && data.email is string && data.email.size() <= 256
+        && data.role in ['viewer', 'editor', 'owner']
+        && isTimestampOrString(data.addedAt);
+    }
+
+    function isValidInvitation(data) {
+      return data.keys().hasAll(['email', 'itemId', 'itemType', 'ownerId', 'role', 'status', 'createdAt'])
+        && data.email is string && data.email.size() <= 256
+        && data.itemId is string && data.itemId.size() <= 128
+        && data.itemType in ['note', 'chat']
+        && data.ownerId is string && data.ownerId.size() <= 128
+        && data.role in ['viewer', 'editor']
+        && data.status in ['pending', 'accepted', 'declined']
+        && isTimestampOrString(data.createdAt);
+    }
+
+    // --- COLLECTION RULES ---
+
+    // User Profiles
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) 
+        && isValidUser(incoming())
+        && incoming().uid == userId;
+      allow update: if isOwner(userId)
+        && isValidUser(incoming())
+        && incoming().uid == existing().uid
+        && (incoming().createdAt == existing().createdAt || !existing().keys().contains('createdAt'));
+
+      // Access index for shared items
+      match /access/{itemId} {
+        allow list, get: if isOwner(userId);
+        allow create: if isOwner(userId);
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    // Chats architecture
+    match /users/{userId}/chats/{chatId} {
+      allow list, get: if isOwner(userId) || isMemberOf(userId, 'chats', chatId);
+      allow create: if isOwner(userId) && isValidId(chatId) && isValidChat(incoming()) && incoming().userId == userId;
+      allow update: if (isOwner(userId) || (isMemberOf(userId, 'chats', chatId) && memberRole(userId, 'chats', chatId) == 'editor'))
+        && isValidChat(incoming()) 
+        && incoming().userId == existing().userId
+        && (incoming().createdAt == existing().createdAt || !existing().keys().contains('createdAt'));
+      allow delete: if isOwner(userId);
+
+      // Members sub-collection
+      match /members/{memberId} {
+        allow list, get: if isOwner(userId) || isMemberOf(userId, 'chats', chatId);
+        allow create: if isOwner(userId) && isValidId(memberId) && isValidMember(incoming());
+        allow update: if isOwner(userId) && isValidMember(incoming());
+        allow delete: if isOwner(userId);
+      }
+
+      // Messages sub-collection
+      match /messages/{messageId} {
+        allow list, get: if isOwner(userId) || isMemberOf(userId, 'chats', chatId);
+        allow create: if (isOwner(userId) || (isMemberOf(userId, 'chats', chatId) && memberRole(userId, 'chats', chatId) == 'editor')) 
+          && isValidId(messageId) && isValidMessage(incoming());
+      }
+    }
+
+    // Wisdom Library (Notes)
+    match /users/{userId}/notes/{noteId} {
+      allow list, get: if isOwner(userId) || isMemberOf(userId, 'notes', noteId);
+      allow create: if isOwner(userId) && isValidId(noteId) && isValidNote(incoming()) && incoming().userId == userId;
+      allow update: if (isOwner(userId) || (isMemberOf(userId, 'notes', noteId) && memberRole(userId, 'notes', noteId) == 'editor'))
+        && isValidNote(incoming()) 
+        && incoming().userId == existing().userId
+        && (incoming().createdAt == existing().createdAt || !existing().keys().contains('createdAt'));
+      allow delete: if isOwner(userId);
+
+      // Members sub-collection
+      match /members/{memberId} {
+        allow list, get: if isOwner(userId) || isMemberOf(userId, 'notes', noteId);
+        allow create: if isOwner(userId) && isValidId(memberId) && isValidMember(incoming());
+        allow update: if isOwner(userId) && isValidMember(incoming());
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    // Shared Invitations
+    match /invitations/{invitationId} {
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || resource.data.email == request.auth.token.email);
+      allow get: if isSignedIn() && (resource.data.ownerId == request.auth.uid || resource.data.email == request.auth.token.email);
+      allow create: if isSignedIn() && isValidInvitation(incoming()) && incoming().ownerId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        (resource.data.ownerId == request.auth.uid && incoming().status == existing().status) ||
+        (resource.data.email == request.auth.token.email && incoming().diff(existing()).affectedKeys().hasOnly(['status']))
+      );
+      allow delete: if isSignedIn() && (resource.data.ownerId == request.auth.uid || resource.data.email == request.auth.token.email);
+    }
+
+    // Tasks (Action sequences)
+    match /users/{userId}/tasks/{taskId} {
+      allow list, get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(taskId) && isValidTask(incoming()) && incoming().userId == userId;
+      allow update: if isOwner(userId) && isValidTask(incoming()) 
+        && incoming().userId == existing().userId
+        && (incoming().createdAt == existing().createdAt || !existing().keys().contains('createdAt'));
+      allow delete: if isOwner(userId);
+    }
+
+    // Creative Vault (Images)
+    match /users/{userId}/images/{imageId} {
+      allow list: if isOwner(userId);
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidId(imageId) && isValidImage(incoming()) && incoming().userId == userId;
+      allow delete: if isOwner(userId);
+    }
+  }
+}
